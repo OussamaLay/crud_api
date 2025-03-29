@@ -16,9 +16,10 @@ class Book extends AbstractBaseEntity
     protected ?string $title = null;
 
     /**
-     * @ORM\Column(type="string")
+     * @ORM\ManyToOne(targetEntity="App\Entity\Author", inversedBy="books")
+     * @ORM\JoinColumn(nullable=false)
      */
-    protected ?string $author = null;
+    private ?Author $author = null;
 
     /**
      * @ORM\Column(type="string", nullable=true)
@@ -46,21 +47,19 @@ class Book extends AbstractBaseEntity
         $this->title = $title;
     }
 
-    /**
-     * @return string|null
-     */
-    public function getAuthor(): ?string
+
+    public function getAuthor(): ?Author
     {
         return $this->author;
     }
 
-    /**
-     * @param string|null $author
-     */
-    public function setAuthor(?string $author): void
+
+    public function setAuthor(?Author $author): self
     {
         $this->author = $author;
+        return $this;
     }
+
 
     /**
      * @return string|null

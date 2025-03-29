@@ -3,7 +3,7 @@ services:
         container_name: tp-ws-db
         image: mariadb:10.3
         ports:
-            - "3306:3306"
+            - "3307:3306"
         environment:
             - MARIADB_ROOT_PASSWORD=easyma
         volumes:

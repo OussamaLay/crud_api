@@ -1,0 +1,145 @@
+<?php
+
+namespace App\Controller;
+
+use App\Entity\Message;
+use App\Entity\User\User;
+use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Routing\Annotation\Route;
+use OpenApi\Annotations as OA;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpClient\HttpClient;
+
+/**
+ * @Route("/api/messages", name="message")
+ * @OA\Tag(name="Messages")
+ */
+class MessageController extends AbstractSimpleApiController
+{
+    /**
+     * @Route("", methods={"POST"}, name="_create")
+     * @OA\RequestBody(
+     *   required=true,
+     *   @OA\JsonContent(
+     *      type="object",
+     *      @OA\Property(property="content", type="string"),
+     *      @OA\Property(property="userId", type="integer")
+     *   )
+     * )
+     * @OA\Response(response=201, description="Message créé avec succès")
+     * @OA\Response(response=400, description="Données invalides")
+     */
+    public function create(Request $request, EntityManagerInterface $em): Response
+    {
+        $data = json_decode($request->getContent(), true);
+
+        if (!isset($data['content'], $data['userId'])) {
+            return new JsonResponse(['error' => 'Invalid data'], 400);
+        }
+
+        $user = $em->getRepository(User::class)->find($data['userId']);
+        if (!$user) {
+            return new JsonResponse(['error' => 'User not found'], 404);
+        }
+
+        // 🔹 Enregistrer le message utilisateur
+        $userMessage = new Message();
+        $userMessage->setContent($data['content']);
+        $userMessage->setType('text');
+        $userMessage->setUser($user);
+        $em->persist($userMessage);
+
+        // 🔹 Communication avec l’IA locale
+        $client = HttpClient::create();
+        $payload = [
+            "model" => "llama3.2",
+            "messages" => [
+                ["role" => "system", "content" => "Tu es une IA amicale."],
+                ["role" => "user", "content" => $data['content']]
+            ],
+            "max_tokens" => 500
+        ];
+
+        try {
+            $response = $client->request('POST', 'http://localhost:11434/api/chat', [
+                'json' => $payload
+            ]);
+            $llmResponse = json_decode($response->getContent(), true);
+            $assistantMessage = $llmResponse['message']['content'] ?? 'Je ne comprends pas.';
+        } catch (\Exception $e) {
+            $assistantMessage = "Erreur lors de la communication avec l'IA.";
+        }
+
+        // 🔹 Enregistrer la réponse de l’IA
+        $botMessage = new Message();
+        $botMessage->setContent($assistantMessage);
+        $botMessage->setType('text');
+        $botMessage->setUser($user);
+        $em->persist($botMessage);
+        $em->flush();
+
+        return new JsonResponse(['message' => $assistantMessage], 201);
+    }
+
+    /**
+     * @Route("/{id}", methods={"GET"}, requirements={"id"="\d+"}, name="_get")
+     * @OA\Response(response=200, description="Retourne un message")
+     * @OA\Response(response=404, description="Message non trouvé")
+     */
+    public function read(Request $request, EntityManagerInterface $em): Response
+    {
+        $message = $em->getRepository(Message::class)->find($request->get('id'));
+
+        if (!$message) {
+            return new JsonResponse(['error' => 'Message not found'], 404);
+        }
+
+        return new JsonResponse([
+            'id' => $message->getId(),
+            'content' => $message->getContent(),
+            'type' => $message->getType(),
+            'userId' => $message->getUser()->getId(),
+        ]);
+    }
+
+    /**
+     * @Route("", methods={"GET"}, name="_getAll")
+     * @OA\Response(response=200, description="Retourne tous les messages")
+     */
+    public function getAll(EntityManagerInterface $em): Response
+    {
+        $messages = $em->getRepository(Message::class)->findAll();
+        $data = [];
+
+        foreach ($messages as $message) {
+            $data[] = [
+                'id' => $message->getId(),
+                'content' => $message->getContent(),
+                'type' => $message->getType(),
+                'userId' => $message->getUser()->getId(),
+            ];
+        }
+
+        return new JsonResponse($data, Response::HTTP_OK);
+    }
+
+    /**
+     * @Route("/{id}", methods={"DELETE"}, requirements={"id"="\d+"}, name="_delete")
+     * @OA\Response(response=204, description="Message supprimé")
+     */
+    public function delete(Request $request, EntityManagerInterface $em): Response
+    {
+        $message = $em->getRepository(Message::class)->find($request->get('id'));
+
+        if (!$message) {
+            return new JsonResponse(['error' => 'Message not found'], 404);
+        }
+
+        $em->remove($message);
+        $em->flush();
+
+        return new Response(null, Response::HTTP_NO_CONTENT);
+    }
+}
